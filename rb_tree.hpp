@@ -5,6 +5,9 @@
 
 namespace rbt {
 
+class RbTree {
+
+};
 
 } // namespace rbt
 

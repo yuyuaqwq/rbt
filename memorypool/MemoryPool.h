@@ -93,6 +93,6 @@ class MemoryPool
     static_assert(BlockSize >= 2 * sizeof(slot_type_), "BlockSize too small.");
 };
 
-#include "MemoryPool.tcc"
+#include "MemoryPool.cpp"
 
 #endif // MEMORY_POOL_H
