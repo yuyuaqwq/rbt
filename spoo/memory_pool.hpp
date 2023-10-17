@@ -2,7 +2,7 @@
 
 #include <vector>
 
-namespace fpoo {
+namespace spoo {
 
 namespace detail {
 consteval size_t bit_shift(size_t base) {
@@ -69,7 +69,6 @@ public:
         }
         else {
             if (begin_slot_ >= end_slot_) {
-                // 已经没有空闲的slot了，创建新的block
                 CreateBlock();
             }
             return begin_slot_++;
@@ -119,6 +118,6 @@ private:
     SlotPos end_slot_;
 };
 
-} // namespace fpoo
+} // namespace spoo
 
 #endif // MEMORY_POOL_MEMORY_POOL_HPP_
