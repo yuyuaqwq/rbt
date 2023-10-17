@@ -2,7 +2,7 @@
 
 #include <vector>
 
-namespace memory_pool {
+namespace fpoo {
 
 namespace detail {
 consteval size_t bit_shift(size_t base) {
@@ -24,18 +24,13 @@ consteval size_t bit_fill(size_t bit_count) {
 }
 
 template <class T, size_t block_size = 4096>
-class IndexPool {
+class MemoryPool {
 public:
     using SlotPos = uint32_t;
     using BlockId = uint32_t;
     using SlotId = uint32_t;
-
-    static constexpr size_t kBlockSlotCount = block_size / sizeof(T);
-    static constexpr size_t kBlockShift = detail::bit_shift(kBlockSlotCount);
-    static constexpr size_t kSlotMark = kBlockSlotCount - 1;
-    static constexpr SlotPos kSlotPosInvalid = detail::bit_fill(32);
-   
-    union Slot {
+	
+	union Slot {
         SlotPos next;
         T element;
     };
@@ -43,20 +38,25 @@ public:
         Slot* slot_array;
     };
 
+    static constexpr size_t kBlockSlotCount = block_size / sizeof(T);
+    static constexpr size_t kBlockShift = detail::bit_shift(kBlockSlotCount);
+    static constexpr size_t kSlotMark = kBlockSlotCount - 1;
+    static constexpr SlotPos kSlotPosInvalid = detail::bit_fill(sizeof(SlotPos));
+  
 public:
-    IndexPool() noexcept {
+    MemoryPool() noexcept {
         free_slot_ = kSlotPosInvalid;
         begin_slot_ = kSlotPosInvalid;
         end_slot_ = kSlotPosInvalid;
     }
-    ~IndexPool() noexcept {
+    ~MemoryPool() noexcept {
         for (auto& block : block_table_) {
             delete[] block.slot_array;
         }
     }
 
-    IndexPool(const IndexPool&) = delete;
-    void operator=(const IndexPool&) = delete;
+    MemoryPool(const MemoryPool&) = delete;
+    void operator=(const MemoryPool&) = delete;
 
     SlotPos allocate() {
         SlotPos res{};
@@ -119,6 +119,6 @@ private:
     SlotPos end_slot_;
 };
 
-} // namespace memory_pool
+} // namespace fpoo
 
 #endif // MEMORY_POOL_MEMORY_POOL_HPP_
