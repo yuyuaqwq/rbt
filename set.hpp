@@ -4,35 +4,37 @@
 #include <rbt/rb_tree.hpp>
 
 namespace rbt {
-template <class Key>
+
+template <class KeyT, class KeyCompareT>
 class SetTraits {
 public:
-    using KeyType = Key;
-    struct ElementType {
-        void operator=(const KeyType& k) {
+    using Key = KeyT;
+    using Value = Key;
+    struct Element {
+        void operator=(const Key& k) {
             key = k;
         }
-        void operator=(KeyType&& k) {
+        void operator=(Key&& k) {
             key = std::move(k);
         }
-        KeyType key;
+        Key key;
     };
+
+    using KeyCompare = KeyCompareT;
+    using ValueCompare = KeyCompare;
 };
 
-template <class Key>
-class set : public RbTree<SetTraits<Key>> {
+template <class Key, class Compare = std::less<Key>>
+class set : public RbTree<SetTraits<Key, Compare>> {
 private:
-    using Tree = RbTree<SetTraits<Key>>;
+    using Tree = RbTree<SetTraits<Key, Compare>>;
 public:
-
-    template <typename KeyReference>
-    void insert(KeyReference&& key) {
-        Tree::Put(std::forward<KeyReference>(key));
-    }
-
-    void find() {
+    std::pair<Tree::iterator, bool> insert(Tree::value_type&& value) {
+        Tree::Put(std::move(value));
 
     }
+
+
 };
 
 } // namespace rbt

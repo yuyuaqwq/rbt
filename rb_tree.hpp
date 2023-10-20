@@ -9,11 +9,165 @@
 
 namespace rbt {
 
+template <class RbTreeT>
+class RbTreeUncheckedConstIterator {
+public:
+    using iterator_category = std::bidirectional_iterator_tag;
+
+    using NodeAddress = typename RbTreeT::NodeAddress;
+    using IteratorStack = typename RbTreeT::IteratorStack;
+
+    using value_type = typename RbTreeT::value_type;
+    using difference_type = typename RbTreeT::difference_type;
+    using pointer = typename RbTreeT::const_pointer;
+    using reference = const value_type&;
+
+    RbTreeUncheckedConstIterator(RbTreeT& rb_tree, NodeAddress node_address, IteratorStack&& stack) noexcept :
+        rb_tree_ { rb_tree },
+        node_address_ { node_address }, 
+        stack_{ std::move(stack) } {
+        
+    }
+
+    [[nodiscard]] reference operator*() const noexcept {
+        return node_address_->element;
+    }
+
+    [[nodiscard]] pointer operator->() const noexcept {
+        return std::pointer_traits<pointer>::pointer_to(**this);
+    }
+
+    RbTreeUncheckedConstIterator& operator++() noexcept {
+        node_address_ = node_address_->next_;
+        return *this;
+    }
+
+    RbTreeUncheckedConstIterator operator++(int) noexcept {
+        RbTreeUncheckedConstIterator tmp = *this;
+        node_address_ = node_address_->next_;
+        return tmp;
+    }
+
+    RbTreeUncheckedConstIterator& operator--() noexcept {
+        node_address_ = node_address_->prev_;
+        return *this;
+    }
+
+    RbTreeUncheckedConstIterator operator--(int) noexcept {
+        RbTreeUncheckedConstIterator tmp = *this;
+        node_address_ = node_address_->prev_;
+        return tmp;
+    }
+
+    [[nodiscard]] bool operator==(const RbTreeUncheckedConstIterator& right) const noexcept {
+        return node_address_ == right.node_address_;
+    }
+
+    IteratorStack stack_;
+    NodeAddress node_address_;
+
+    RbTreeT& rb_tree_;
+};
+
+template <class RbTreeT>
+class RbTreeConstIterator : public RbTreeUncheckedConstIterator<RbTreeT> {
+public:
+    using Base = RbTreeUncheckedConstIterator<RbTreeT>;
+    using iterator_category = std::bidirectional_iterator_tag;
+
+    using value_type = typename RbTreeT::value_type;
+    using difference_type = typename RbTreeT::difference_type;
+    using pointer = typename RbTreeT::const_pointer;
+    using reference = const value_type&;
+
+    using Base::Base;
+
+    [[nodiscard]] reference operator*() const noexcept {
+        //return node_address_->element;
+    }
+
+    [[nodiscard]] pointer operator->() const noexcept {
+        return pointer_traits<pointer>::pointer_to(**this);
+    }
+
+    RbTreeConstIterator& operator++() noexcept {
+        this->node_address_ = this->node_address_->next_;
+        return *this;
+    }
+
+    RbTreeConstIterator operator++(int) noexcept {
+        RbTreeConstIterator tmp = *this;
+        ++*this;
+        return tmp;
+    }
+
+    RbTreeConstIterator& operator--() noexcept {
+        const auto new_ptr = this->node_address_->prev_;
+        this->node_address_ = new_ptr;
+        return *this;
+    }
+
+    RbTreeConstIterator operator--(int) noexcept {
+        RbTreeConstIterator tmp = *this;
+        --*this;
+        return tmp;
+    }
+
+    [[nodiscard]] bool operator==(const RbTreeConstIterator& right) const noexcept {
+        return this->node_address_ == right.node_address_;
+    }
+};
+
+template <class RbTreeT>
+class RbTreeIterator : public RbTreeConstIterator<RbTreeT> {
+public:
+    using Base = RbTreeIterator<RbTreeT>;
+    using iterator_category = std::bidirectional_iterator_tag;
+
+    using value_type = typename RbTreeT::value_type;
+    using difference_type = typename RbTreeT::difference_type;
+    using pointer = typename RbTreeT::pointer;
+    using reference = value_type&;
+
+    using Base::Base;
+
+    _NODISCARD reference operator*() const noexcept {
+        return const_cast<reference>(Base::operator*());
+    }
+
+    _NODISCARD pointer operator->() const noexcept {
+        return std::pointer_traits<pointer>::pointer_to(**this);
+    }
+
+    RbTreeIterator& operator++() noexcept {
+        Base::operator++();
+        return *this;
+    }
+
+    RbTreeIterator operator++(int) noexcept {
+        RbTreeIterator tmp = *this;
+        Base::operator++();
+        return tmp;
+    }
+
+    RbTreeIterator& operator--() noexcept {
+        Base::operator--();
+        return *this;
+    }
+
+    RbTreeIterator operator--(int) noexcept {
+        RbTreeIterator tmp = *this;
+        Base::operator--();
+        return tmp;
+    }
+};
+
 template <class Traits>
 class RbTree {
-public:
-    using Key = Traits::KeyType;
-    using Element = Traits::ElementType;
+protected:
+    using Key = Traits::Key;
+    using Value = Traits::Value;
+    using Element = Traits::Element;
 
     using NodeAddress = uint32_t;
     using Color = uint32_t;
@@ -73,6 +227,72 @@ public:
     using AllocatorType = fpoo::CompactMemoryPool<Node>;
 
 public:
+    using key_type = Key;
+    using value_type = Value;
+    using size_type = uint32_t;
+    using difference_type = int32_t;
+
+    using key_compare = typename Traits::KeyCompare;
+    using value_compare = typename Traits::ValueCompare;
+
+    using allocator_type = AllocatorType;
+
+    using reference = value_type&;
+    using const_reference = const value_type&;
+    using pointer = std::allocator_traits<AllocatorType>::pointer;
+    using const_pointer = std::allocator_traits<AllocatorType>::const_pointer;
+
+    using iterator = RbTreeIterator<RbTree<Traits>>;
+    using const_iterator = RbTreeConstIterator<RbTree<Traits>>;
+
+
+public:
+    RbTree() {
+        root_ = kInvalidAddress;
+    }
+
+
+    iterator find(const Key& key) {
+        IteratorStack stack;
+        auto [node_addr, ordering] = Find(stack, key);
+        return iterator{ *this, node_addr, std::move(stack) };
+    }
+
+    const_iterator find(const Key& key) const {
+        IteratorStack stack;
+        auto [node_addr, ordering] = Find(stack, key);
+        return const_iterator{ *this, node_addr, std::move(stack) };
+    }
+
+    template <class K> 
+    iterator find(const K& x);
+
+    template<class K> 
+    const_iterator find(const K& x) const;
+
+
+    /*
+    * iterator
+    */
+    iterator begin() noexcept {
+        auto [node_addr, stack] = First();
+        return iterator{ *this, node_addr, std::move(stack) };
+    }
+
+    const_iterator begin() const noexcept {
+        auto [node_addr, stack] = First();
+        return const_iterator{ *this, node_addr, std::move(stack) };
+    }
+
+    iterator end() noexcept {
+        return iterator{ *this, kInvalidAddress, IteratorStack{} };
+    }
+
+    const_iterator end() const noexcept {
+        return const_iterator{ *this, kInvalidAddress,  IteratorStack{} };
+    }
+
+protected:
     template <typename ElementReference>
     void Put(ElementReference&& ele) {
         auto node_addr = allocator_.allocate();
@@ -115,7 +335,7 @@ public:
         bool correct = false;
         do {
             if (node->GetColor() != kBlack) break;
-            AllocatorType::difference_type high = 1;
+            typename AllocatorType::difference_type high = 1;
             while (node->GetLeft() != kInvalidAddress) {
                 NodeAddress node_id = node->GetLeft();
                 allocator_.dereference(node);
@@ -131,51 +351,43 @@ public:
         return correct;
     }
 
-//    /*
-//    * 迭代器相关
-//    */
-//    NodeAddress IteratorLocate(* tree, Iterator* iterator, LIBYUC_CONTAINER_RB_TREE_REFERENCER_Type_Key* key, LIBYUC_CONTAINER_RB_TREE_COMPARER_Type_Diff* cmp_diff) {
-//        RbBsTreeStackVectorInit(&iterator->stack);
-//        iterator->cur_id = RbIteratorLocate((RbBsTree*)tree, &iterator->stack, key, cmp_diff);
-//        return iterator->cur_id;
-//    }
-//    NodeAddress IteratorFirst(* tree, Iterator* iterator) {
-//        RbBsTreeStackVectorInit(&iterator->stack);
-//        iterator->cur_id = RbBsTreeIteratorFirst((RbBsTree*)tree, &iterator->stack);
-//        return iterator->cur_id;
-//    }
-//    NodeAddress IteratorLast(* tree, Iterator* iterator) {
-//        RbBsTreeStackVectorInit(&iterator->stack);
-//        iterator->cur_id = RbBsTreeIteratorLast((RbBsTree*)tree, &iterator->stack);
-//        return iterator->cur_id;
-//    }
-//    NodeAddress IteratorNext(* tree, Iterator* iterator) {
-//        if (iterator->cur_id == kInvalidAddress) {
-//            IteratorFirst(tree, iterator);
-//            return iterator->cur_id;
-//        }
-//        iterator->cur_id = RbBsTreeIteratorNext((RbBsTree*)tree, &iterator->stack, iterator->cur_id);
-//        return iterator->cur_id;
-//    }
-//    NodeAddress IteratorPrev(* tree, Iterator* iterator) {
-//        if (iterator->cur_id == kInvalidAddress) {
-//            IteratorLast(tree, iterator);
-//            return iterator->cur_id;
-//        }
-//        iterator->cur_id = RbBsTreeIteratorPrev((RbBsTree*)tree, &iterator->stack, iterator->cur_id);
-//        return iterator->cur_id;
-//    }
-//    void IteratorCopy(Iterator* dst_iterator, const Iterator* src_iterator) {
-//        dst_iterator->cur_id = src_iterator->cur_id;
-//        LIBYUC_CONTAINER_RB_TREE_REFERENCER_Type_Offset count = RbBsTreeStackVectorGetCount((IteratorStack&)&src_iterator->stack);
-//        RbBsTreeStackVectorSetCount(&dst_iterator->stack, count);
-//        for (LIBYUC_CONTAINER_RB_TREE_REFERENCER_Type_Offset i = 0; i < count; i++) {
-//            *RbBsTreeStackVectorIndex(&dst_iterator->stack, i) = *RbBsTreeStackVectorIndex((IteratorStack&)&src_iterator->stack, i);
-//        }
-//    }
+
+    std::tuple<NodeAddress, IteratorStack> First() const noexcept {
+        IteratorStack stack;
+        NodeAddress cur_id = root_;
+        if (cur_id == kInvalidAddress) {
+            return kInvalidAddress;
+        }
+        Node* cur = allocator_.reference(cur_id);
+        while (cur.GetLeft() != kInvalidAddress) {
+            stack.push_back(cur_id);
+            cur_id = cur.GetLeft();
+            allocator_.dereference(cur);
+            cur = allocator_.reference(cur_id);
+        }
+        allocator_.dereference(cur);
+        return std::tuple{ cur_id, std::move(stack) };
+    }
+
+    std::tuple<NodeAddress, IteratorStack> Last() const noexcept {
+        IteratorStack stack;
+        NodeAddress cur_id = root_;
+        if (cur_id == kInvalidAddress) {
+            return kInvalidAddress;
+        }
+        Node* cur = allocator_.reference(cur_id);
+        while (cur.GetRight() != kInvalidAddress) {
+            stack.push_back(cur_id);
+            cur_id = cur.GetRight();
+            allocator_.dereference(cur);
+            cur = allocator_.reference(cur_id);
+        }
+        allocator_.dereference(cur);
+        return std::tuple{ cur_id, std::move(stack) };
+    }
+
 
 private:
-
     /*
     * 替换新孩子节点
     */
@@ -580,8 +792,9 @@ private:
             Key& cur_key = cur->GetElement().key;
             Key& node_key = node->GetElement().key;
 
-            auto ordering = cur_key <=> node_key;
-            if (ordering < 0) {
+            //auto ordering = cur_key <=> node_key;
+            //if (ordering < 0) {
+            if (key_compare{}(cur_key, node_key)) {
                 if (cur->GetRight() == kInvalidAddress) {
                     cur->SetRight(node_id);
                     break;
@@ -589,7 +802,8 @@ private:
                 parent_id = cur_id;
                 cur_id = cur->GetRight();
             }
-            else if (ordering > 0) {
+            //else if (ordering > 0) {
+            else if (key_compare{}(node_key, cur_key)) {
                 if (cur->GetLeft() == kInvalidAddress) {
                     cur->SetLeft(node_id);
                     break;
@@ -758,14 +972,19 @@ private:
             perv_id = cur_id;
             Node* cur = allocator_.reference(cur_id);
             Key& cur_key = cur->GetElement().key;
-            ordering = key <=> cur_key;
-            if (ordering > 0) {
-                cur_id = cur->GetRight();
-            }
-            else if (ordering < 0) {
+            //ordering = key <=> cur_key;
+            //if (ordering < 0) {
+            if (key_compare{}(key, cur_key)) {
+                ordering = -1;
                 cur_id = cur->GetLeft();
             }
+            //else if (ordering > 0) {
+            if (key_compare{}(cur_key, key)) {
+                ordering = 1;
+                cur_id = cur->GetRight();
+            }
             else {
+                ordering = 0;
                 allocator_.dereference(cur);
                 return std::tuple{ cur_id, ordering };
             }
