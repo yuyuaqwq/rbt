@@ -3,7 +3,7 @@
 
 #include <utility>
 #include <cassert>
-#include <vector>
+#include <array>
 
 #include <fpoo/memory_pool.hpp>
 
@@ -165,18 +165,48 @@ public:
 template <class Traits>
 class RbTree {
 protected:
+    friend class RbTreeUncheckedConstIterator<RbTree<Traits>>;
+
     using Key = Traits::Key;
     using Value = Traits::Value;
     using Element = Traits::Element;
 
     using NodeAddress = uint32_t;
     using Color = uint32_t;
-    using IteratorStack = std::vector<NodeAddress>;
 
     static constexpr Color kBlack = 0x0;
     static constexpr Color kRed = 0x1;
     static constexpr NodeAddress kMaxAddress = 0x7ffffffe;
     static constexpr NodeAddress kInvalidAddress = 0x7fffffff;
+
+    class IteratorStack {
+    public:
+        NodeAddress& front() noexcept {
+            return stack_[cur_pos_ - 1];
+        }
+
+        constexpr void push_back(const NodeAddress& value) {
+            stack_[cur_pos_++] = value;
+        }
+
+        void pop_back() {
+            --cur_pos_;
+        }
+
+        void clear() {
+            cur_pos_ = 0;
+        }
+
+        bool empty() {
+            return cur_pos_ == 0;
+        }
+
+    private:
+        std::array<NodeAddress, 62> stack_;
+        uint32_t cur_pos_ = 0;
+    };
+    //using IteratorStack = std::vector<NodeAddress>;
+
 
     class Node {
     public:
@@ -244,32 +274,130 @@ public:
 
     using iterator = RbTreeIterator<RbTree<Traits>>;
     using const_iterator = RbTreeConstIterator<RbTree<Traits>>;
+    using reverse_iterator = std::reverse_iterator<iterator>;
+    using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
+    //using node_type = typename Traits::NodeType;
 
 public:
     RbTree() {
-        root_ = kInvalidAddress;
+    }
+
+public:
+
+    void clear() noexcept {
+
+    }
+
+    [[nodiscard]] size_type size() const noexcept {
+        return size_;
+    }
+
+    [[nodiscard]] size_type max_size() const noexcept {
+        return kMaxAddress;
+    }
+
+    [[nodiscard]] bool empty() const noexcept {
+        return root_ == kInvalidAddress;
+    }
+
+    //[[nodiscard]] allocator_type get_allocator() const noexcept {
+    //    return static_cast<allocator_type>();
+    //}
+
+    key_compare key_comp() const {
+        return key_compare{};
+    }
+
+    value_compare value_comp() const {
+        return value_compare{};
     }
 
 
     iterator find(const Key& key) {
         IteratorStack stack;
         auto [node_addr, ordering] = Find(stack, key);
+        if (ordering != 0) {
+            return end();
+        }
         return iterator{ *this, node_addr, std::move(stack) };
     }
 
     const_iterator find(const Key& key) const {
         IteratorStack stack;
         auto [node_addr, ordering] = Find(stack, key);
+        if (ordering != 0) {
+            return end();
+        }
         return const_iterator{ *this, node_addr, std::move(stack) };
     }
 
-    template <class K> 
-    iterator find(const K& x);
+    template <class K, class Kc = key_compare, class = typename Kc::is_transparent>
+    iterator find(const K& x) {
+        IteratorStack stack;
+        auto [node_addr, ordering] = Find(stack, x);
+        if (ordering != 0) {
+            return end();
+        }
+        return iterator{ *this, node_addr, std::move(stack) };
+    }
 
-    template<class K> 
-    const_iterator find(const K& x) const;
+    template<class K, class Kc = key_compare, class = typename Kc::is_transparent>
+    const_iterator find(const K& x) const {
+        IteratorStack stack;
+        auto [node_addr, ordering] = Find(stack, x);
+        if (ordering != 0) {
+            return end();
+        }
+        return const_iterator{ *this, node_addr, std::move(stack) };
+    }
 
+    template<class K> bool contains(const K& x) const {
+        return find(x) != end();
+    }
+
+    std::pair<iterator, bool> insert(const value_type& value) {
+        auto node_addr = allocator_.allocate();
+        if (node_addr > kMaxAddress) {
+            throw std::bad_alloc();     // "The maximum node limit of the tree has been reached."
+        }
+
+        Node* node = allocator_.reference(node_addr);
+        std::construct_at<Node>(node);
+        node->GetElement() = value;
+
+        IteratorStack stack;
+        auto success = Insert(stack, node_addr);
+        if (!success) {
+            std::destroy_at<Node>(node);
+            allocator_.dereference(node);
+            allocator_.deallocate(node_addr);
+
+            node_addr = stack.front();
+            stack.pop_back();
+            return std::pair{ iterator{ *this, node_addr, std::move(stack) }, false };
+        }
+        ++size_;
+        allocator_.dereference(node);
+        /* 使其保证栈的变更 */
+        InsertFixup(stack, node_addr);
+        return std::pair{ iterator{ *this, node_addr, std::move(stack) }, true };
+    }
+
+    //std::pair<iterator, bool> insert(value_type&& value) {
+
+    //}
+
+    size_type erase(const key_type& key) {
+        IteratorStack stack;
+        auto [del_node_id, ordering] = Find(stack, key);
+        if (del_node_id == kInvalidAddress) return 0;
+        auto node = Delete(stack, del_node_id);
+        if (node != kInvalidAddress) {
+            return 1;
+        }
+        return 0;
+    }
 
     /*
     * iterator
@@ -292,38 +420,43 @@ public:
         return const_iterator{ *this, kInvalidAddress,  IteratorStack{} };
     }
 
-protected:
-    template <typename ElementReference>
-    void Put(ElementReference&& ele) {
-        auto node_addr = allocator_.allocate();
-        if (node_addr > kMaxAddress) {
-            throw std::runtime_error("The maximum node limit of the tree has been reached.");
-        }
-
-        Node* node = allocator_.reference(node_addr);
-        std::construct_at<Node>(node);
-        if constexpr (std::is_lvalue_reference_v<decltype(ele)>) {
-            node->GetElement() = ele;
-        }
-        else {
-            node->GetElement() = std::move(ele);
-        }
-        allocator_.dereference(node);
-        Put(node_addr);
-
+    [[nodiscard]] reverse_iterator rbegin() noexcept {
+        return reverse_iterator(end());
     }
 
+    [[nodiscard]] const_reverse_iterator rbegin() const noexcept {
+        return const_reverse_iterator(end());
+    }
+
+    [[nodiscard]] reverse_iterator rend() noexcept {
+        return reverse_iterator(begin());
+    }
+
+    [[nodiscard]] const_reverse_iterator rend() const noexcept {
+        return const_reverse_iterator(begin());
+    }
+
+    [[nodiscard]] const_iterator cbegin() const noexcept {
+        return begin();
+    }
+
+    [[nodiscard]] const_iterator cend() const noexcept {
+        return end();
+    }
+
+    [[nodiscard]] const_reverse_iterator crbegin() const noexcept {
+        return rbegin();
+    }
+
+    [[nodiscard]] const_reverse_iterator crend() const noexcept {
+        return rend();
+    }
+
+protected:
     NodeAddress Find(const Key& key) {
         IteratorStack stack;
         auto [node_addr, ordering] = Find(stack, key);
         return ordering == 0 ? node_addr : kInvalidAddress;
-    }
-
-    bool Delete(const Key&& key) {
-        IteratorStack stack;
-        auto [del_node_id, ordering] = Find(stack, key);
-        if (del_node_id == kInvalidAddress) return false;
-        return Delete(stack, del_node_id);
     }
 
     /*
@@ -385,7 +518,6 @@ protected:
         allocator_.dereference(cur);
         return std::tuple{ cur_id, std::move(stack) };
     }
-
 
 private:
     /*
@@ -508,8 +640,12 @@ private:
             Node* parent = allocator_.reference(parent_id);
             NodeAddress sibling_id = GetSiblingNode(parent, cur_id, cur);
             allocator_.dereference(parent);
-            Node* sibling = allocator_.reference(sibling_id);
-            if (sibling_id != kInvalidAddress && sibling->GetColor() == kRed) {
+            
+            Node* sibling = nullptr;
+            if (sibling_id != kInvalidAddress) {
+                sibling = allocator_.reference(sibling_id);
+            }
+            if (sibling && sibling->GetColor() == kRed) {
                 /* 兄弟节点是红色，说明是4节点的插入，分裂(红黑树的体现就是变色)，父节点向上插入，继续回溯 */
                 cur->SetColor(kBlack);
                 sibling->SetColor(kBlack);
@@ -529,7 +665,7 @@ private:
                     *     5r     20b    ->     !2r         10r
                     * !2r                                                 20b
                 */
-                assert(sibling_id == kInvalidAddress || sibling->GetColor() == kBlack);
+                  assert(sibling_id == kInvalidAddress || sibling->GetColor() == kBlack);
                 NodeAddress new_sub_root_id;
                 NodeAddress old_sub_root_id = parent_id;
                 Node* old_sub_root = allocator_.reference(old_sub_root_id);
@@ -716,7 +852,7 @@ private:
 
     /*
     * 向树中插入节点
-    * 允许重复key，同一个节点重复插入时返回false
+    * 插入树中已存在的节点返回false
     */
     bool Insert(IteratorStack& stack, NodeAddress node_id) {
         Node* node = allocator_.reference(node_id);
@@ -731,15 +867,22 @@ private:
         bool success = true;
         while (cur_id != kInvalidAddress) {
             stack.push_back(cur_id);
-            if (cur_id == node_id) {
-                success = false;
-                break;
-            }
+
             Node* cur = allocator_.reference(cur_id);
             Key& cur_key = cur->GetElement().key;
-            Key& node_key = node->GetElement().key;
+            Key& find_key = node->GetElement().key;
 
-            if (cur_key < node_key) {
+            std::strong_ordering ordering = find_key <=> cur_key;;
+            if (ordering < 0) {
+            // if (key_compare{}(find_key, cur_key)) {
+                if (cur->GetLeft() == kInvalidAddress) {
+                    cur->SetLeft(node_id);
+                    break;
+                }
+                cur_id = cur->GetLeft();
+            }
+            else if (ordering > 0) {
+            // else if (key_compare{}(cur_key, find_key)) {
                 if (cur->GetRight() == kInvalidAddress) {
                     cur->SetRight(node_id);
                     break;
@@ -747,28 +890,15 @@ private:
                 cur_id = cur->GetRight();
             }
             else {
-                if (cur_id == node_id) break;
-                if (cur->GetLeft() == kInvalidAddress) {
-                    cur->SetLeft(node_id);
-                    break;
-                }
-                cur_id = cur->GetLeft();
+                // 找到相等的节点时，栈上指向找到的节点
+                success = false;
+                break;
             }
             allocator_.dereference(cur);
         }
         if (cur) allocator_.dereference(cur);
         allocator_.dereference(node);
         return success;
-    }
-    /*
-    * 向树中插入节点
-    * 允许重复key，但插入同一个节点时返回false
-    */
-    bool Insert(NodeAddress insert_node_id) {
-        IteratorStack stack;
-        if (!Insert(stack, insert_node_id)) return false;
-        InsertFixup(stack, insert_node_id);
-        return true;
     }
 
     /*
@@ -963,7 +1093,7 @@ private:
     /*
     * 查找指定节点
     */
-    std::tuple<NodeAddress, std::strong_ordering> Find(IteratorStack& stack, const Key& key) {
+    std::tuple<NodeAddress, std::strong_ordering> Find(IteratorStack& stack, const Key& find_key) {
         NodeAddress cur_id = root_;
         stack.clear();
         NodeAddress perv_id = kInvalidAddress;
@@ -972,19 +1102,19 @@ private:
             perv_id = cur_id;
             Node* cur = allocator_.reference(cur_id);
             Key& cur_key = cur->GetElement().key;
-            //ordering = key <=> cur_key;
-            //if (ordering < 0) {
-            if (key_compare{}(key, cur_key)) {
-                ordering = -1;
+            ordering = find_key <=> cur_key;
+            if (ordering < 0) {
+            //if (key_compare{}(key, cur_key)) {
+                //ordering = -1;
                 cur_id = cur->GetLeft();
             }
-            //else if (ordering > 0) {
-            if (key_compare{}(cur_key, key)) {
-                ordering = 1;
+            else if (ordering > 0) {
+            //else if (key_compare{}(cur_key, key)) {
+                //ordering = 1;
                 cur_id = cur->GetRight();
             }
             else {
-                ordering = 0;
+                //ordering = 0;
                 allocator_.dereference(cur);
                 return std::tuple{ cur_id, ordering };
             }
@@ -1025,7 +1155,8 @@ private:
 
 private:
     AllocatorType allocator_;
-    NodeAddress root_;
+    NodeAddress root_ = kInvalidAddress;
+    size_type size_ = 0;
 };
 
 } // namespace rbt

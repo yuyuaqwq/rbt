@@ -29,10 +29,6 @@ class set : public RbTree<SetTraits<Key, Compare>> {
 private:
     using Tree = RbTree<SetTraits<Key, Compare>>;
 public:
-    std::pair<Tree::iterator, bool> insert(Tree::value_type&& value) {
-        Tree::Put(std::move(value));
-
-    }
 
 
 };
